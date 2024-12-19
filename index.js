@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const sequelize = require("./config/sequelize");
 const User = require("./model/user");
 const Task = require("./model/task");
+const Comment = require("./model/comment");
 
 // USER SECTION
 app.post("/register", async (req, res) => {
@@ -140,8 +141,8 @@ app.put("/task/:taskId", async (req, res) => {
       return res.status(400).json({ message: "Invalid task ID" });
     }
 
-    const isTaskValid = await Task.findByPk(taskIdToNum);
     const isUserValid = await User.findByPk(userId);
+    const isTaskValid = await Task.findByPk(taskIdToNum);
 
     if (!status || !userId) {
       return res
@@ -154,27 +155,33 @@ app.put("/task/:taskId", async (req, res) => {
     }
 
     if (isTaskValid) {
-      if (isUserValid.role !== "admin" || Task.createdFor !== isUserValid.id) {
+      if (
+        isUserValid.role === "admin" ||
+        isTaskValid.createdFor === isUserValid.id
+      ) {
+        try {
+          await Task.update(
+            {
+              status: status,
+            },
+            {
+              where: { id: taskIdToNum },
+            }
+          );
+          return res.status(200).json({ message: "Task updated successfully" });
+        } catch (error) {
+          return res.status(500).json({ message: "" + message.error });
+        }
+      } else {
         return res.status(400).json({
           message: "You do not have permission to update this task status",
         });
       }
-
-      await Task.update(
-        {
-          status: status,
-        },
-        {
-          where: { id: taskIdToNum },
-        }
-      );
     } else {
       return res.status(404).json({ message: "Task not found" });
     }
-
-    return res.status(200).json({ message: "Task updated successfully" });
   } catch (error) {
-    return res.status(500), json({ message: "" + message.error });
+    return res.status(500).json({ message: +message.error });
   }
 });
 
@@ -216,6 +223,120 @@ app.delete("/delete-task/:taskId", async (req, res) => {
       .json({ message: "Internal servver error " + error.message });
   }
 });
+
+// ADDING COMMENTS TO TASK
+app.post("/task-comment", async (req, res) => {
+  try {
+    const { comment, createdFor } = req.body;
+
+    const ifTaskExists = await Task.findByPk(createdFor);
+    if (ifTaskExists) {
+      const newComment = {
+        comment,
+        createdFor,
+      };
+      await Comment.create(newComment);
+      return res.status(200).json({ message: "Comment added successfully" });
+    } else {
+      return res.status(400).json({ message: "Task does not exist" });
+    }
+  } catch (error) {
+    return res.status(500).json({ message: "" + error.message });
+  }
+});
+
+app.put("/task-comment/:commentId", async (req, res) => {
+  try {
+    const { comment, createdBy } = req.body;
+    const { commentId } = req.params;
+
+    const commentIdToNum = parseInt(commentId);
+    if (isNaN(commentIdToNum)) {
+      return res.status(400).json({ message: "Invalid comment ID" });
+    }
+
+    const ifUserExists = await User.findByPk(createdBy);
+    const ifCommentExists = await Comment.findByPk(commentIdToNum);
+
+    if (!ifUserExists) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!ifCommentExists) {
+      return res.status(404).json({ message: "Comment not found" });
+    }
+
+    const ifTaskExists = await Task.findByPk(ifCommentExists.createdFor);
+
+    if (!ifTaskExists) {
+      return res.status(404).json({ message: "Associated task not found" });
+    }
+
+    if (
+      ifUserExists.role === "admin" || 
+      ifTaskExists.createdFor === ifUserExists.id
+    ) {
+      await Comment.update(
+        { comment },
+        { where: { id: commentIdToNum } }
+      );
+
+      return res
+        .status(200)
+        .json({ message: "Comment updated successfully" });
+    } else {
+      return res.status(403).json({
+        message: "You do not have permission to update this comment",
+      });
+    }
+  } catch (error) {
+    return res.status(500).json({ message: "Internal server error: " + error.message });
+  }
+});
+
+app.delete("/task-comment/:commentId", async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const { userId } = req.body;
+
+    const commentIdToNum = parseInt(commentId);
+    if (isNaN(commentIdToNum)) {
+      return res.status(400).json({ message: "Invalid comment ID" });
+    }
+
+    const ifUserExists = await User.findByPk(userId);
+    const ifCommentExists = await Comment.findByPk(commentIdToNum);
+
+    if (!ifUserExists) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!ifCommentExists) {
+      return res.status(404).json({ message: "Comment not found" });
+    }
+
+    const ifTaskExists = await Task.findByPk(ifCommentExists.createdFor);
+
+    if (!ifTaskExists) {
+      return res.status(404).json({ message: "Associated task not found" });
+    }
+
+    if (
+      ifUserExists.role === "admin" || 
+      ifTaskExists.createdFor === ifUserExists.id
+    ) {
+      await Comment.destroy({ where: { id: commentIdToNum } });
+      return res.status(200).json({ message: "Comment deleted successfully" });
+    } else {
+      return res.status(403).json({
+        message: "You do not have permission to delete this comment",
+      });
+    }
+  } catch (error) {
+    return res.status(500).json({ message: "Internal server error: " + error.message });
+  }
+});
+
 
 app.listen(2000, async () => {
   try {
